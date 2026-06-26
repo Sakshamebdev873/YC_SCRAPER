@@ -44,11 +44,12 @@ This project consists of two main components:
 
 3. **Environment Setup**
    You need an OpenAI API Key for both the scraper and the sender.
-   Open `yc_scraper/settings.py` and set your OpenAI API key:
-   ```python
-   OPENAI_API_KEY = "sk-proj-..." 
+   Create a `.env` file in the root directory and add your keys:
+   ```env
+   OPENAI_API_KEY="sk-proj-..."
+   GMAIL_EMAIL="your.email@gmail.com"
+   GMAIL_PASSWORD="your_app_password"
    ```
-   Alternatively, set it in your environment variables.
 
 ---
 
@@ -70,12 +71,7 @@ python run_scraper.py --all
 *Results are saved to `output/yc_founders_emails.csv`.*
 
 ### Phase 2: Send Personalized Emails
-Set up your Gmail SMTP credentials as environment variables. **Note:** You must use an [App Password](https://myaccount.google.com/apppasswords) if 2FA is enabled.
-
-```powershell
-$env:GMAIL_EMAIL="your.email@gmail.com"
-$env:GMAIL_PASSWORD="your_app_password"
-```
+Set up your Gmail SMTP credentials in the `.env` file. **Note:** You must use an [App Password](https://myaccount.google.com/apppasswords) if 2FA is enabled.
 
 **Always preview first:**
 ```bash

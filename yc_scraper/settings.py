@@ -8,6 +8,9 @@ SPIDER_MODULES = ["yc_scraper.spiders"]
 NEWSPIDER_MODULE = "yc_scraper.spiders"
 
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- OpenAI API Configuration ---
 # Set this via environment variable (e.g., set OPENAI_API_KEY=sk-...)
