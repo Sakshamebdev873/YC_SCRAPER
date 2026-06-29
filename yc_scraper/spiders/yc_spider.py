@@ -10,6 +10,8 @@ from yc_scraper.items import FounderItem
 
 # Map short codes (W25, S25) → Algolia full batch names
 BATCH_NAME_MAP = {
+    # 2027
+    "W27": "Winter 2027",
     # 2026
     "F26": "Fall 2026",
     "SU26": "Summer 2026",

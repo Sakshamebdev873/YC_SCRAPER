@@ -44,6 +44,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from openai import OpenAI
+from yc_scraper.spiders.yc_spider import BATCH_NAME_MAP
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -234,6 +235,7 @@ def followup_eligible(entry: dict, round_num: int) -> bool:
 def main():
     parser = argparse.ArgumentParser(description="Send personalized cold emails to YC founders")
     parser.add_argument("--csv", type=Path, default=DEFAULT_CSV, help="Path to founders CSV")
+    parser.add_argument("--batch", type=str, default="", help="Only send to this batch (e.g. W27, W26)")
     parser.add_argument("--max", type=int, default=0, help="Max emails to send (0 = all)")
     parser.add_argument("--dry-run", action="store_true", help="Preview emails, do not send")
     parser.add_argument("--test-email", type=str, default="", help="Redirect all sends to this address")
@@ -275,6 +277,14 @@ def main():
         return
 
     rows = load_csv(args.csv)
+
+    if args.batch:
+        batch_filter = BATCH_NAME_MAP.get(args.batch.upper(), args.batch)
+        rows = [r for r in rows if r.get("batch", "").strip() == batch_filter]
+        if not rows:
+            print(f"ERROR: No rows found for batch '{args.batch}' (looked for '{batch_filter}').")
+            return
+
     sent_log = load_sent_log()
 
     is_followup = args.followup > 0
