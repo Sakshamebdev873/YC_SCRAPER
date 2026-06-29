@@ -75,50 +75,49 @@ CANDIDATE_BIO = """
 
 # ── Initial email — target ~90 words (Nick Singh: 50-125, best ~100) ──────────
 
-SYSTEM_PROMPT = """You write short cold emails from Saksham Arya to YC founders. Target length: 80-100 words total.
+SYSTEM_PROMPT = """You write short cold emails from Saksham Arya to startup founders. Target length: 70-90 words total.
 
-Output this EXACT template — only fill in [COMPANY_HOOK] and [COMPANY]:
+Output this EXACT template — only fill in [FIRST_NAME], [COMPANY_HOOK]:
 
 ---
+Hi [FIRST_NAME],
+
 [COMPANY_HOOK]
 
-I'm Saksham, a full-stack developer and B.Tech CS student (graduating 2027) looking for an SDE Intern role.
-
-What I've shipped:
-- SatsEarn.app — live Bitcoin micro-rewards platform with real users across multiple countries
+Quick snapshot:
+- SatsEarn.app — live Bitcoin micro-rewards platform, real users across multiple countries, shipped solo
 - 1st place, BrainBytes Hackathon 2025
-- 4 remote internships: MERN, React.js, GSAP animations, AI voice agents (Vapi)
+- 4 remote internships (MERN, AI voice agents, full-stack React) — B.Tech CS, graduating 2027
 
-Resume: https://drive.google.com/file/d/1Pyueb3pTLu_dBHOb69tHXq2fjrRaw47f/view?usp=drive_link
-GitHub: https://github.com/Sakshamebdev873
+Resume: https://drive.google.com/file/d/1Pyueb3pTLu_dBHOb69tHXq2fjrRaw47f/view?usp=drive_link | GitHub: https://github.com/Sakshamebdev873
 
-I'd like to interview for an SDE Intern role at [COMPANY]. Would you be open to a quick chat?
+Open to a 20-minute call this week?
 
-— Saksham Arya
-+91 8738853746
-sakshamarya015@gmail.com
+Saksham Arya
++91 8738853746 | sakshamarya015@gmail.com
 ---
 
 Rules:
-- [COMPANY_HOOK]: one punchy sentence (under 20 words) specific to this company. Lead with something concrete — a product detail, a problem they're solving, or a technical decision. No filler: no "I hope you are doing well", "I came across your company", "I am excited", or anything templated. Right tone: "Rebuilding payroll from scratch for gig workers is one of those problems that sounds boring until you realise nobody has actually solved it — [COMPANY] is."
-- [COMPANY]: the actual company name.
+- [FIRST_NAME]: the founder's first name only (e.g. "Alex", not "Alex Smith").
+- [COMPANY_HOOK]: 1-2 sentences (under 35 words) specific to this company, tying to something Saksham has actually built. Lead with what the company is doing, then connect it to Saksham's relevant experience. No filler: no "I hope you are doing well", "I came across your company", "I am excited", or anything templated. Right tone: "Rebuilding payroll from scratch for gig workers is the kind of problem that sounds boring until you realise nobody has solved it — I've built MERN payment flows under similar constraints."
 - Do NOT change any other wording, bullets, links, or the signature.
 - Return only the email body. No subject line. No extra commentary."""
 
 USER_PROMPT_TEMPLATE = """Write an application email for {company_name} (YC {batch}).
 
+Founder name: {founder_name}
 About {company_name}:
 {company_description}
 Website: {company_website}
 
-Fill in [COMPANY_HOOK] with one specific sentence about this company, and [COMPANY] with "{company_name}"."""
+Fill in [FIRST_NAME] with the founder's first name, and [COMPANY_HOOK] with 1-2 specific sentences about this company tied to Saksham's experience."""
 
 # Subject line: credential-first (Nick Singh Tip #6)
-SUBJECT_TEMPLATE = "BrainBytes Hackathon Winner — SDE Intern @ {company_name}"
+SUBJECT_TEMPLATE = "SDE Intern @ {company_name} — BrainBytes 2025 + live product shipped"
 
 # ── Follow-up templates — static, short nudges (Nick Singh Tip #7) ────────────
 
-FOLLOWUP_SUBJECT_TEMPLATE = "Re: BrainBytes Hackathon Winner — SDE Intern @ {company_name}"
+FOLLOWUP_SUBJECT_TEMPLATE = "Re: SDE Intern @ {company_name} — BrainBytes 2025 + live product shipped"
 
 FOLLOWUP_BODIES = [
     None,  # index 0 unused (initial email uses SYSTEM_PROMPT above)
@@ -180,6 +179,7 @@ def personalize_email(client: OpenAI, row: dict) -> str:
     prompt = USER_PROMPT_TEMPLATE.format(
         company_name=row["company_name"],
         batch=row["batch"],
+        founder_name=row.get("founder_name", "").strip() or "there",
         company_description=row.get("company_description", "").strip() or "an early-stage startup",
         company_website=row.get("company_website", ""),
     )
