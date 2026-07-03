@@ -1,10 +1,10 @@
 # YC Founder Cold Email Applier
 
-An automated pipeline to scrape Y Combinator startup founders and send them highly personalized, AI-generated cold emails. 
+An automated pipeline to scrape Y Combinator startup founders and send them personalized, AI-generated cold emails for SDE intern outreach.
 
 This project consists of two main components:
 1. **YC Scraper (`yc_scraper`)**: Scrapes Y Combinator companies and founders via the Algolia API and YC company pages, then predicts founder emails using OpenAI ChatGPT (`gpt-4o-mini`).
-2. **Cold Email Sender (`send_emails.py`)**: Reads the scraped CSV data, generates personalized emails based on your profile (Saksham Arya) and the company's description using OpenAI, and sends them via Gmail/Outlook SMTP.
+2. **Cold Email Sender (`send_emails.py`)**: Reads the scraped CSV data, generates personalized initial emails plus a 3-round follow-up sequence based on your profile (Saksham Arya) and the company's description, and sends them via Gmail SMTP.
 
 ---
 
@@ -12,17 +12,19 @@ This project consists of two main components:
 
 ### 1. Scraper (`run_scraper.py`)
 - **Algolia API Integration**: Bypasses traditional scraping blocks by querying the same Algolia index YC uses (`YCCompany_production`).
-- **Batch Filtering**: easily target specific cohorts using shortcodes (e.g., `W25`, `S25`, `F26`) or run against default recent batches.
+- **Batch Filtering**: easily target specific cohorts using shortcodes (e.g., `W26`, `SP26`, `SU26`, `W25`, `SP25`, `S25`, `F25`) or run against the default recent batches (W26 + SP26 + S25 + F25).
 - **Deep Data Extraction**: Pulls founder names, titles, LinkedIn, and Twitter profiles from individual company pages (handling Inertia.js embedded data).
 - **AI Email Prediction**: Uses `gpt-4o-mini` to intelligently predict founder email addresses based on their name and company domain (e.g., guessing `firstname@domain`).
 - **CSV Export**: Outputs a clean dataset to `output/yc_founders_emails.csv`.
 
 ### 2. Email Sender (`send_emails.py`)
-- **AI Personalization**: Uses `gpt-4o-mini` to write a formal, warm, and highly personalized cold email. It blends your specific background (B.Tech student, creator of SatsEarn.app, Hackathon winner) with the company's exact description.
+- **AI Personalization**: Uses `gpt-4o-mini` to write short (70-100 word), flowing-prose cold emails from a natural-language prompt (no rigid mail-merge templates) — blending one relevant piece of your background with something specific about the company.
+- **Follow-up Sequence**: Built-in 3-round follow-up cadence (`--followup 1/2/3`, spaced 3-4 / 4-5 / 5 days apart) with static nudge templates, tracked per-recipient in `sent_log.json`.
+- **Company-Based Deduplication**: Only ever emails one founder per company (preferring the CEO if there's a choice), so co-founders never compare notes on a mass blast.
 - **Dry-Run Mode**: Preview exactly what emails will look like in the console before actually sending anything (`--dry-run`).
 - **Rate Limiting & Safety**: Built-in delays (30 seconds between emails) to avoid spam filters.
-- **Duplicate Prevention**: Keeps a `sent_log.json` state file to ensure you never accidentally email the same founder twice.
-- **SMTP Integration**: Works via standard SMTP (configured for Gmail/Google Workspace via App Passwords).
+- **Duplicate Prevention**: Keeps a `sent_log.json` state file (sent timestamp + follow-up history) to ensure you never accidentally re-email the same founder.
+- **SMTP Integration**: Works via standard SMTP (configured for Gmail via App Passwords).
 
 ---
 
@@ -65,8 +67,8 @@ python run_scraper.py
 # Scrape a specific batch (e.g., Winter 2025) and limit to 50 companies
 python run_scraper.py --batch W25 --max 50
 
-# Scrape all companies (Warning: Takes a long time and uses many OpenAI tokens)
-python run_scraper.py --all
+# Scrape all companies in a batch (Warning: Takes a long time and uses many OpenAI tokens)
+python run_scraper.py --batch W26 --all
 ```
 *Results are saved to `output/yc_founders_emails.csv`.*
 
@@ -78,22 +80,35 @@ Set up your Gmail SMTP credentials in the `.env` file. **Note:** You must use an
 python send_emails.py --dry-run
 ```
 
-**Send to a limited batch:**
+**Send initial emails (limited or unlimited):**
 ```bash
 # Send emails to the first 10 founders in the queue
 python send_emails.py --max 10
+
+# Send to everyone eligible (skips anyone already in output/sent_log.json,
+# and skips companies where any founder was already contacted)
+python send_emails.py
+
+# Restrict to one scraped batch
+python send_emails.py --batch W26
 ```
 
-**Send to everyone:**
+**Send follow-ups** (run these a few days apart, per founder already contacted):
 ```bash
-# Will skip anyone already in output/sent_log.json
-python send_emails.py
+python send_emails.py --followup 1   # 3-4 days after the initial email
+python send_emails.py --followup 2   # 4-5 days after follow-up #1
+python send_emails.py --followup 3   # 5 days after follow-up #2 — final nudge
 ```
+
+Other useful flags: `--csv <path>` to point at a different CSV, `--test-email you@example.com` to redirect all sends to one inbox while testing.
 
 ---
 
 ## Customizing Your Profile
-If you want to modify the email contents, open `send_emails.py` and edit the `CANDIDATE_BIO` variable. This bio is fed directly to the AI to construct the email body.
+If you want to modify the email contents, open `send_emails.py`:
+- `CANDIDATE_BIO` — your background, fed to the AI to construct the initial email.
+- `SYSTEM_PROMPT_TEMPLATE` — the prose-style writing instructions (tone, structure, word count, banned phrases) for the initial email.
+- `FOLLOWUP_BODIES` — the static templates for follow-up rounds 1-3.
 
 ## Disclaimer
 Please ensure you comply with anti-spam regulations (like CAN-SPAM) when sending cold emails. Keep your sending volume low and targeted.
