@@ -76,45 +76,40 @@ CANDIDATE_BIO = """
 
 # ── Initial email — target ~90 words (Nick Singh: 50-125, best ~100) ──────────
 
-SYSTEM_PROMPT = """You write short cold emails from Saksham Arya to startup founders. Target length: 70-90 words total.
+SYSTEM_PROMPT_TEMPLATE = """You write short cold emails from Saksham Arya to startup founders, applying for an SDE Intern role. These must NOT read like a mail-merged template — no bullet lists, no "quick snapshot" section, no keyword-stuffed credential dump. Write like a specific person who actually looked at this company and has a real reason to write in, not like every founder is getting the same email.
 
-Output this EXACT template — only fill in [FIRST_NAME], [COMPANY_HOOK]:
+Write the email as flowing prose (no headers, no bullets), following this shape:
 
----
-Hi [FIRST_NAME],
-
-[COMPANY_HOOK]
-
-Quick snapshot:
-- SatsEarn.app — live Bitcoin micro-rewards platform, real users across multiple countries, shipped solo
-- 1st place, BrainBytes Hackathon 2025
-- 4 remote internships (MERN, AI voice agents, full-stack React) — B.Tech CS, graduating 2027
-
-Resume: https://drive.google.com/file/d/1Pyueb3pTLu_dBHOb69tHXq2fjrRaw47f/view?usp=drive_link | GitHub: https://github.com/Sakshamebdev873
-
-Open to a 20-minute call this week?
-
+1. Opening (2-3 sentences): say something specific and real about the problem [company] is working on — an actual observation, not a generic compliment ("cool project", "impressive team"). Then connect it naturally to ONE relevant thing Saksham has built (pick whichever fits best from the bio below — don't list more than one or two).
+2. Optionally one short added-context sentence (e.g. hackathon win, graduation year) — only include it if it strengthens the pitch; skip if it'd feel bolted on.
+3. On its own line: "Resume: https://drive.google.com/file/d/1Pyueb3pTLu_dBHOb69tHXq2fjrRaw47f/view?usp=drive_link | GitHub: https://github.com/Sakshamebdev873"
+4. A low-key, specific closing ask. Vary the phrasing across emails — do not default to "Open to a 20-minute call this week?" every time. Something like "Are you hiring for anything on the eng side right now?" or "Worth a quick call?" or "Any chance there's room for an intern this cycle?".
+5. Sign-off, exactly:
 Saksham Arya
 +91 8738853746 | sakshamarya015@gmail.com
----
 
-Rules:
-- [FIRST_NAME]: the founder's first name only (e.g. "Alex", not "Alex Smith").
-- [COMPANY_HOOK]: 1-2 sentences (under 35 words) specific to this company, tying to something Saksham has actually built. Lead with what the company is doing, then connect it to Saksham's relevant experience. No filler: no "I hope you are doing well", "I came across your company", "I am excited", or anything templated. Right tone: "Rebuilding payroll from scratch for gig workers is the kind of problem that sounds boring until you realise nobody has solved it — I've built MERN payment flows under similar constraints."
-- Do NOT change any other wording, bullets, links, or the signature.
-- Return only the email body. No subject line. No extra commentary."""
+Saksham's background (pick 1-2 relevant details — never dump all of it):
+{bio}
 
-USER_PROMPT_TEMPLATE = """Write an application email for {company_name} (YC {batch}).
+Hard rules:
+- 70-100 words total.
+- Never use these phrases: "I hope this email finds you", "I came across your company", "I'm excited/passionate about", "reaching out", "opportunity", "I'd love the chance".
+- No bullet points, no markdown formatting, no headers.
+- Should read like one engineer emailing another, not a job application form.
+- Return only the email body — no subject line, no commentary."""
 
-Founder name: {founder_name}
-About {company_name}:
-{company_description}
+SYSTEM_PROMPT = SYSTEM_PROMPT_TEMPLATE.format(bio=CANDIDATE_BIO)
+
+USER_PROMPT_TEMPLATE = """Write the email for {company_name} (YC {batch}).
+
+Founder's first name: {founder_first_name}
+About {company_name}: {company_description}
 Website: {company_website}
 
-Fill in [FIRST_NAME] with the founder's first name, and [COMPANY_HOOK] with 1-2 specific sentences about this company tied to Saksham's experience."""
+Open with "Hi {founder_first_name}," then write the rest of the email per the system instructions."""
 
-# Subject line: credential-first (Nick Singh Tip #6)
-SUBJECT_TEMPLATE = "SDE Intern @ {company_name} — BrainBytes 2025 + live product shipped"
+# Subject line: natural, not keyword-stuffed
+SUBJECT_TEMPLATE = "Question about the SDE Intern role at {company_name}"
 
 # ── Follow-up templates — static, short nudges (Nick Singh Tip #7) ────────────
 
@@ -177,10 +172,12 @@ def load_csv(path: Path) -> list[dict]:
 
 
 def personalize_email(client: OpenAI, row: dict) -> str:
+    founder_name = row.get("founder_name", "").strip() or "there"
+    founder_first_name = founder_name.split()[0] if founder_name != "there" else "there"
     prompt = USER_PROMPT_TEMPLATE.format(
         company_name=row["company_name"],
         batch=row["batch"],
-        founder_name=row.get("founder_name", "").strip() or "there",
+        founder_first_name=founder_first_name,
         company_description=row.get("company_description", "").strip() or "an early-stage startup",
         company_website=row.get("company_website", ""),
     )
@@ -212,6 +209,21 @@ def connect_smtp(email: str, password: str) -> smtplib.SMTP:
     smtp.ehlo()
     smtp.login(email, password)
     return smtp
+
+
+def dedupe_by_company(rows: list[dict]) -> list[dict]:
+    """Keep only one founder per company — never email multiple co-founders
+    at the same startup, since they'll compare notes and it reads as a mass blast.
+    Prefers a CEO-titled founder; falls back to the first one listed."""
+    best_by_company = {}
+    for row in rows:
+        company = row["company_name"]
+        existing = best_by_company.get(company)
+        if existing is None:
+            best_by_company[company] = row
+        elif "ceo" in row.get("founder_title", "").lower() and "ceo" not in existing.get("founder_title", "").lower():
+            best_by_company[company] = row
+    return list(best_by_company.values())
 
 
 def followup_eligible(entry: dict, round_num: int) -> bool:
@@ -300,12 +312,17 @@ def main():
             and followup_eligible(sent_log[r["predicted_email"]], round_num)
         ]
     else:
-        queue = [
+        contacted_companies = {
+            r["company_name"] for r in rows if r.get("predicted_email") in sent_log
+        }
+        candidates = [
             r for r in rows
             if r.get("predicted_email")
             and r["founder_name"] not in ("Unknown", "")
             and r["predicted_email"] not in sent_log
+            and r["company_name"] not in contacted_companies
         ]
+        queue = dedupe_by_company(candidates)
 
     if args.max > 0:
         queue = queue[: args.max]
