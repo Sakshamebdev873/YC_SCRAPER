@@ -1,11 +1,17 @@
-"""
-YC Founder Cold Email Sender — Gmail via SMTP
+"""Cold Email Sender — Gmail via SMTP
+
+Domain-agnostic sender: pick a domain (what you're pitching and to whom) and
+this script handles personalization, dedup, follow-up cadence, and sent-log
+tracking the same way for all of them. Domains live in domains/ — see
+domains/job_application.py (SDE Intern outreach to YC founders) and
+domains/sales_pitch.py (SatsEarn.app pitch, currently against placeholder
+leads) for what a domain provides.
 
 Usage:
     # Preview emails without sending (always start here)
     python send_emails.py --dry-run
 
-    # Send initial emails to first 10 founders
+    # Send initial emails to first 10 founders (job domain, default)
     python send_emails.py --max 10
 
     # Send all unsent founders
@@ -23,6 +29,11 @@ Usage:
     # Use a different CSV
     python send_emails.py --csv output/yc_founders_emails.csv
 
+    # Sales domain: pitch SatsEarn.app to placeholder leads, routed to a
+    # fixed test inbox until a real sales-lead source is wired up
+    python send_emails.py --sales --dry-run
+    python send_emails.py --sales
+
 Environment variables (set in .env or system):
     GMAIL_EMAIL      your Gmail address
     GMAIL_PASSWORD   App Password (create at myaccount.google.com/apppasswords)
@@ -30,7 +41,6 @@ Environment variables (set in .env or system):
 """
 
 import argparse
-import csv
 import json
 import os
 import smtplib
@@ -44,7 +54,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from openai import OpenAI
-from yc_scraper.spiders.yc_spider import BATCH_NAME_MAP
+from domains import get_domain
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -53,99 +63,12 @@ SMTP_PORT = 587
 
 OUTPUT_DIR = Path("output")
 SENT_LOG = OUTPUT_DIR / "sent_log.json"
-DEFAULT_CSV = OUTPUT_DIR / "yc_founders_emails.csv"
 
 # Seconds between each send — keeps you under spam radar
 SEND_DELAY = 30
 
 # Minimum days before each follow-up round (Nick Singh: 3-4 / 4-5 / 5 days)
 FOLLOWUP_MIN_DAYS = [0, 3, 4, 5]  # index = follow-up round number
-
-# ── Saksham's profile ─────────────────────────────────────────────────────────
-
-CANDIDATE_BIO = """
-- 2nd-year B.Tech CSE student (graduating 2027), Bipin Tripathi Kumaoun Institute of Technology
-- Built SatsEarn.app — a live Bitcoin micro-rewards platform with real active users across multiple countries; zero KYC, Lightning Network payouts, AI-powered bot prevention
-- Won 1st place at BrainBytes Hackathon 2025
-- 4 remote internships: React.js dev, Full Stack (MERN), creative frontend with GSAP animations, AI voice agent for real estate using Vapi API
-- Stack: MERN (MongoDB, Express, React, Node.js), Supabase, Tailwind CSS, GSAP, Framer Motion, Gemini AI
-- Built AI-powered products: Nayamitrr (legal chatbot with document generation), Developer Mate (AI mentor for beginner devs)
-- GitHub: https://github.com/Sakshamebdev873
-- LinkedIn: https://www.linkedin.com/in/saksham-arya-b9a793330/
-""".strip()
-
-# ── Initial email — target ~90 words (Nick Singh: 50-125, best ~100) ──────────
-
-SYSTEM_PROMPT_TEMPLATE = """You write short cold emails from Saksham Arya to startup founders, applying for an SDE Intern role. These must NOT read like a mail-merged template — no bullet lists, no "quick snapshot" section, no keyword-stuffed credential dump. Write like a specific person who actually looked at this company and has a real reason to write in, not like every founder is getting the same email.
-
-Write the email as flowing prose (no headers, no bullets), following this shape:
-
-1. Opening (2-3 sentences): say something specific and real about the problem [company] is working on — an actual observation, not a generic compliment ("cool project", "impressive team"). Then connect it naturally to ONE relevant thing Saksham has built (pick whichever fits best from the bio below — don't list more than one or two).
-2. Optionally one short added-context sentence (e.g. hackathon win, graduation year) — only include it if it strengthens the pitch; skip if it'd feel bolted on.
-3. On its own line: "Resume: https://drive.google.com/file/d/1Pyueb3pTLu_dBHOb69tHXq2fjrRaw47f/view?usp=drive_link | GitHub: https://github.com/Sakshamebdev873"
-4. A low-key, specific closing ask. Vary the phrasing across emails — do not default to "Open to a 20-minute call this week?" every time. Something like "Are you hiring for anything on the eng side right now?" or "Worth a quick call?" or "Any chance there's room for an intern this cycle?".
-5. Sign-off, exactly:
-Saksham Arya
-+91 8738853746 | sakshamarya015@gmail.com
-
-Saksham's background (pick 1-2 relevant details — never dump all of it):
-{bio}
-
-Hard rules:
-- 70-100 words total.
-- Never use these phrases: "I hope this email finds you", "I came across your company", "I'm excited/passionate about", "reaching out", "opportunity", "I'd love the chance".
-- No bullet points, no markdown formatting, no headers.
-- Should read like one engineer emailing another, not a job application form.
-- Return only the email body — no subject line, no commentary."""
-
-SYSTEM_PROMPT = SYSTEM_PROMPT_TEMPLATE.format(bio=CANDIDATE_BIO)
-
-USER_PROMPT_TEMPLATE = """Write the email for {company_name} (YC {batch}).
-
-Founder's first name: {founder_first_name}
-About {company_name}: {company_description}
-Website: {company_website}
-
-Open with "Hi {founder_first_name}," then write the rest of the email per the system instructions."""
-
-# Subject line: natural, not keyword-stuffed
-SUBJECT_TEMPLATE = "Question about the SDE Intern role at {company_name}"
-
-# ── Follow-up templates — static, short nudges (Nick Singh Tip #7) ────────────
-
-FOLLOWUP_SUBJECT_TEMPLATE = "Re: SDE Intern @ {company_name} — BrainBytes 2025 + live product shipped"
-
-FOLLOWUP_BODIES = [
-    None,  # index 0 unused (initial email uses SYSTEM_PROMPT above)
-    # Round 1 — sent 3-4 days after initial
-    """\
-Just following up on my note below — still very interested in the SDE Intern role at {company_name}.
-
-Happy to share more about my work if helpful.
-
-Resume: https://drive.google.com/file/d/1Pyueb3pTLu_dBHOb69tHXq2fjrRaw47f/view?usp=drive_link
-
-— Saksham Arya
-+91 8738853746""",
-    # Round 2 — sent 4-5 days after follow-up #1 (adds urgency/FOMO per Tip #3)
-    """\
-One more follow-up on the SDE Intern role at {company_name}. I'm actively interviewing at a few places but {company_name} is genuinely at the top of my list.
-
-Would love a quick chat if there's any interest.
-
-Resume: https://drive.google.com/file/d/1Pyueb3pTLu_dBHOb69tHXq2fjrRaw47f/view?usp=drive_link
-
-— Saksham Arya
-+91 8738853746""",
-    # Round 3 — final nudge, sent 5 days after follow-up #2
-    """\
-Last follow-up — completely understand if the timing isn't right. If an SDE Intern opening ever comes up at {company_name}, I'd genuinely love to be considered.
-
-Resume: https://drive.google.com/file/d/1Pyueb3pTLu_dBHOb69tHXq2fjrRaw47f/view?usp=drive_link
-
-— Saksham Arya
-+91 8738853746""",
-]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -166,17 +89,12 @@ def save_sent_log(log: dict):
     SENT_LOG.write_text(json.dumps(log, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def load_csv(path: Path) -> list[dict]:
-    with open(path, encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
-def personalize_email(client: OpenAI, row: dict) -> str:
+def personalize_email(client: OpenAI, row: dict, system_prompt: str, user_prompt_template: str) -> str:
     founder_name = row.get("founder_name", "").strip() or "there"
     founder_first_name = founder_name.split()[0] if founder_name != "there" else "there"
-    prompt = USER_PROMPT_TEMPLATE.format(
+    prompt = user_prompt_template.format(
         company_name=row["company_name"],
-        batch=row["batch"],
+        batch=row.get("batch", ""),
         founder_first_name=founder_first_name,
         company_description=row.get("company_description", "").strip() or "an early-stage startup",
         company_website=row.get("company_website", ""),
@@ -184,7 +102,7 @@ def personalize_email(client: OpenAI, row: dict) -> str:
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
         temperature=0.3,
@@ -212,8 +130,8 @@ def connect_smtp(email: str, password: str) -> smtplib.SMTP:
 
 
 def dedupe_by_company(rows: list[dict]) -> list[dict]:
-    """Keep only one founder per company — never email multiple co-founders
-    at the same startup, since they'll compare notes and it reads as a mass blast.
+    """Keep only one contact per company — never email multiple people
+    at the same company, since they'll compare notes and it reads as a mass blast.
     Prefers a CEO-titled founder; falls back to the first one listed."""
     best_by_company = {}
     for row in rows:
@@ -245,10 +163,15 @@ def followup_eligible(entry: dict, round_num: int) -> bool:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Send personalized cold emails to YC founders")
-    parser.add_argument("--csv", type=Path, default=DEFAULT_CSV, help="Path to founders CSV")
-    parser.add_argument("--batch", type=str, default="", help="Only send to this batch (e.g. W27, W26)")
-    parser.add_argument("--max", type=int, default=0, help="Max emails to send (0 = all)")
+    parser = argparse.ArgumentParser(description="Send personalized cold emails")
+    parser.add_argument("--domain", type=str, default="job", choices=["job", "sales"],
+                         help="Which domain to send for: 'job' (SDE Intern outreach, default) or 'sales' (SatsEarn pitch)")
+    parser.add_argument("--sales", action="store_true", help="Shorthand for --domain sales")
+    parser.add_argument("--csv", type=Path, default=None, help="Path to founders CSV (job domain only)")
+    parser.add_argument("--batch", type=str, default="", help="Only send to this batch (e.g. W27, W26) — job domain only")
+    parser.add_argument("--icp", type=str, default="traders", choices=["traders", "professionals"],
+                         help="Which ICP segment to target — sales domain only (default: traders)")
+    parser.add_argument("--max", type=int, default=0, help="Max emails to send (0 = all / domain default)")
     parser.add_argument("--dry-run", action="store_true", help="Preview emails, do not send")
     parser.add_argument("--test-email", type=str, default="", help="Redirect all sends to this address")
     parser.add_argument(
@@ -257,8 +180,11 @@ def main():
     )
     args = parser.parse_args()
 
+    domain_name = "sales" if args.sales else args.domain
+    domain = get_domain(domain_name)
+
     if not args.test_email:
-        args.test_email = os.environ.get("TEST_EMAIL", "").strip()
+        args.test_email = os.environ.get("TEST_EMAIL", "").strip() or getattr(domain, "DEFAULT_TEST_EMAIL", "")
 
     gmail_email = os.environ.get("GMAIL_EMAIL", "").strip()
     gmail_password = os.environ.get("GMAIL_PASSWORD", "").strip()
@@ -283,19 +209,13 @@ def main():
 
     client = OpenAI(api_key=openai_api_key)
 
-    if not args.csv.exists():
-        print(f"ERROR: CSV not found: {args.csv}")
-        print("Run the scraper first: python run_scraper.py --batch W26 --max 50")
+    try:
+        rows = domain.load_rows(args)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"ERROR: {e}")
         return
 
-    rows = load_csv(args.csv)
-
-    if args.batch:
-        batch_filter = BATCH_NAME_MAP.get(args.batch.upper(), args.batch)
-        rows = [r for r in rows if r.get("batch", "").strip() == batch_filter]
-        if not rows:
-            print(f"ERROR: No rows found for batch '{args.batch}' (looked for '{batch_filter}').")
-            return
+    system_prompt, subject_template, followup_subject_template, followup_bodies = domain.get_prompts(args)
 
     sent_log = load_sent_log()
 
@@ -324,14 +244,16 @@ def main():
         ]
         queue = dedupe_by_company(candidates)
 
-    if args.max > 0:
+    if args.max > 0 and domain_name != "sales":
+        # Sales domain already applies --max when generating its placeholder rows.
         queue = queue[: args.max]
 
     mode_label = f"FOLLOW-UP #{round_num}" if is_followup else "INITIAL"
+    domain_label = f"{domain_name.upper()}/{args.icp.upper()}" if domain_name == "sales" else domain_name.upper()
     print("=" * 60)
-    print(f"  Cold Email Sender — {'DRY RUN' if args.dry_run else 'LIVE'} [{mode_label}]")
+    print(f"  Cold Email Sender — {'DRY RUN' if args.dry_run else 'LIVE'} [{domain_label}] [{mode_label}]")
     print("=" * 60)
-    print(f"  Total in CSV    : {len(rows)}")
+    print(f"  Total loaded    : {len(rows)}")
     print(f"  Already contacted: {len(sent_log)}")
     print(f"  Queue           : {len(queue)}")
     if not args.dry_run:
@@ -346,7 +268,7 @@ def main():
         if is_followup:
             print(f"No eligible follow-ups for round #{round_num}. Either not enough days have passed or all already sent.")
         else:
-            print("Nothing to send — all founders already emailed or no predicted emails found.")
+            print("Nothing to send — all contacts already emailed or no predicted emails found.")
         return
 
     smtp = None
@@ -374,12 +296,12 @@ def main():
         to_addr = args.test_email if args.test_email else real_addr
 
         if is_followup:
-            subject = FOLLOWUP_SUBJECT_TEMPLATE.format(company_name=company)
-            body = FOLLOWUP_BODIES[round_num].format(company_name=company)
+            subject = followup_subject_template.format(company_name=company)
+            body = followup_bodies[round_num].format(company_name=company)
         else:
-            subject = SUBJECT_TEMPLATE.format(company_name=company)
+            subject = subject_template.format(company_name=company)
             try:
-                body = personalize_email(client, row)
+                body = personalize_email(client, row, system_prompt, domain.USER_PROMPT_TEMPLATE)
             except Exception as e:
                 print(f"  GPT error: {e} — skipping")
                 continue
