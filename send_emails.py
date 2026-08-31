@@ -121,10 +121,14 @@ def main():
             or DEFAULT_TEST_EMAIL_BY_DOMAIN[domain]
         )
 
+    sales_target = 0
     if domain in SALES_DOMAIN_ICP and not is_followup:
         icp = SALES_DOMAIN_ICP[domain]
-        count = args.max if args.max > 0 else ICP_DEFAULT_COUNTS[icp]
-        generate_placeholder_leads(conn, domain, count)
+        sales_target = args.max if args.max > 0 else ICP_DEFAULT_COUNTS[icp]
+        existing = len(eligible_initial(conn, domain=domain))
+        needed = max(0, sales_target - existing)
+        if needed > 0:
+            generate_placeholder_leads(conn, domain, needed)
 
     gmail = ("", "")
     if not args.dry_run:
@@ -141,7 +145,10 @@ def main():
         return
 
     templates = get_templates(conn, domain)
-    limit = args.max if args.max > 0 else 0
+    if domain in SALES_DOMAIN_ICP and not is_followup:
+        limit = sales_target
+    else:
+        limit = args.max if args.max > 0 else 0
     if is_followup:
         queue = eligible_followup(conn, domain=domain, round_num=round_num, limit=limit)
     else:
@@ -152,9 +159,13 @@ def main():
     ).fetchone()["c"]
     already_contacted = len(contacted_emails(conn))
 
+    domain_label = domain.upper()
+    if domain in SALES_DOMAIN_ICP:
+        domain_label = f"{domain.upper()}/{SALES_DOMAIN_ICP[domain].upper()}"
+
     mode_label = f"FOLLOW-UP #{round_num}" if is_followup else "INITIAL"
     print("=" * 60)
-    print(f"  Cold Email Sender — {'DRY RUN' if args.dry_run else 'LIVE'} [{domain.upper()}] [{mode_label}]")
+    print(f"  Cold Email Sender — {'DRY RUN' if args.dry_run else 'LIVE'} [{domain_label}] [{mode_label}]")
     print("=" * 60)
     print(f"  Total loaded    : {total_loaded}")
     print(f"  Already contacted: {already_contacted}")
