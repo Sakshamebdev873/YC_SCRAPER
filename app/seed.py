@@ -55,3 +55,71 @@ def import_contacts(conn, csv_path, domain: str = "job") -> dict:
             inserted += 1
     conn.commit()
     return {"inserted": inserted, "updated": updated}
+
+
+def _job_templates() -> dict:
+    from domains import job_application as j
+
+    return {
+        "bio": j.CANDIDATE_BIO,
+        "system_prompt": j.SYSTEM_PROMPT,
+        "user_prompt": j.USER_PROMPT_TEMPLATE,
+        "subject": j.SUBJECT_TEMPLATE,
+        "followup_subject": j.FOLLOWUP_SUBJECT_TEMPLATE,
+        "followup_1": j.FOLLOWUP_BODIES[1],
+        "followup_2": j.FOLLOWUP_BODIES[2],
+        "followup_3": j.FOLLOWUP_BODIES[3],
+    }
+
+
+def _sales_templates(icp: str) -> dict:
+    from domains import sales_pitch as s
+
+    system_prompt, subject, followup_subject, followup_bodies = s._resolve(icp)
+    pitch = (
+        s.CORPUS_CARBON_PITCH_TRADERS if icp == "traders"
+        else s.CORPUS_CARBON_PITCH_PROFESSIONALS
+    )
+    return {
+        "bio": pitch,
+        "system_prompt": system_prompt,
+        "user_prompt": s.USER_PROMPT_TEMPLATE,
+        "subject": subject,
+        "followup_subject": followup_subject,
+        "followup_1": followup_bodies[1],
+        "followup_2": followup_bodies[2],
+        "followup_3": followup_bodies[3],
+    }
+
+
+def domain_template_content(domain: str) -> dict:
+    """The eight template strings for a domain, read out of domains/*.py."""
+    if domain == "job":
+        return _job_templates()
+    if domain == "sales":
+        return _sales_templates("traders")
+    if domain == "sales_professionals":
+        return _sales_templates("professionals")
+    raise ValueError(f"Unknown domain '{domain}'")
+
+
+def seed_templates(conn) -> int:
+    """Fills in any missing (domain, key) template rows. Never overwrites."""
+    from app.services.templates import DOMAIN_KEYS
+
+    inserted = 0
+    for domain in DOMAIN_KEYS:
+        content = domain_template_content(domain)
+        for key, value in content.items():
+            exists = conn.execute(
+                "SELECT 1 FROM templates WHERE domain=? AND key=?", (domain, key)
+            ).fetchone()
+            if exists:
+                continue
+            conn.execute(
+                "INSERT INTO templates (domain, key, content, updated_at) VALUES (?, ?, ?, ?)",
+                (domain, key, value, now_iso()),
+            )
+            inserted += 1
+    conn.commit()
+    return inserted
