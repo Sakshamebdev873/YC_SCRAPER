@@ -19,3 +19,9 @@ def conn(db_path):
     init_db(c)
     yield c
     c.close()
+
+
+@pytest.fixture(autouse=True)
+def _point_default_db_at_tmp(monkeypatch, db_path):
+    import app.db
+    monkeypatch.setattr(app.db, "DEFAULT_DB_PATH", db_path)
