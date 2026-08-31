@@ -5,6 +5,7 @@ sent_log.json — those stay on disk as read-only inputs and backups.
 """
 
 import csv
+import json
 from pathlib import Path
 
 from app.db import now_iso
@@ -123,3 +124,59 @@ def seed_templates(conn) -> int:
             inserted += 1
     conn.commit()
     return inserted
+
+
+DEFAULT_CSV = Path("output") / "yc_founders_emails.csv"
+DEFAULT_SENT_LOG = Path("output") / "sent_log.json"
+
+
+def _insert_send_if_absent(conn, email: str, round_num: int, sent_at: str) -> int:
+    exists = conn.execute(
+        "SELECT 1 FROM sends WHERE real_addr = ? AND round = ?", (email, round_num)
+    ).fetchone()
+    if exists:
+        return 0
+    contact = conn.execute(
+        "SELECT id FROM contacts WHERE predicted_email = ?", (email,)
+    ).fetchone()
+    conn.execute(
+        """INSERT INTO sends (contact_id, draft_id, round, to_addr, real_addr,
+                              sent_at, test_mode, error)
+           VALUES (?, NULL, ?, ?, ?, ?, 0, NULL)""",
+        (contact["id"] if contact else None, round_num, email, email, sent_at),
+    )
+    return 1
+
+
+def migrate_sent_log(conn, log_path) -> int:
+    """Imports output/sent_log.json into the sends table. Read-only on the file."""
+    path = Path(log_path)
+    if not path.exists():
+        return 0
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(raw, list):
+        raw = {email: {"sent_at": None, "followups": []} for email in raw}
+
+    inserted = 0
+    for email, entry in raw.items():
+        inserted += _insert_send_if_absent(
+            conn, email, 0, entry.get("sent_at") or now_iso()
+        )
+        for i, stamp in enumerate(entry.get("followups") or [], start=1):
+            inserted += _insert_send_if_absent(conn, email, i, stamp or now_iso())
+    conn.commit()
+    return inserted
+
+
+def seed_all(conn, csv_path=DEFAULT_CSV, log_path=DEFAULT_SENT_LOG) -> dict:
+    """Everything the app needs on boot. Idempotent."""
+    try:
+        contacts = import_contacts(conn, csv_path)
+    except FileNotFoundError:
+        contacts = {"inserted": 0, "updated": 0}
+    return {
+        "contacts": contacts,
+        "templates": seed_templates(conn),
+        "sends": migrate_sent_log(conn, log_path),
+    }
