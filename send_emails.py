@@ -49,7 +49,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.db import get_conn, init_db, now_iso
+from app.db import DEFAULT_DB_PATH, get_conn, init_db, now_iso
 from app.seed import DEFAULT_CSV, seed_all
 from app.services.drafts import upsert_draft, update_draft
 from app.services.leads import SALES_DOMAIN_ICP, generate_placeholder_leads
@@ -57,7 +57,7 @@ from app.services.mailer import APP_PASSWORD_HELP, connect_smtp, gmail_credentia
 from app.services.personalize import (
     generate_body, openai_client, render_followup_body, render_subject,
 )
-from app.services.queue import eligible_followup, eligible_initial
+from app.services.queue import contacted_emails, eligible_followup, eligible_initial
 from app.services.templates import get_templates
 
 SEND_DELAY = 30
@@ -147,10 +147,17 @@ def main():
     else:
         queue = eligible_initial(conn, domain=domain, batch=args.batch, limit=limit)
 
+    total_loaded = conn.execute(
+        "SELECT COUNT(*) c FROM contacts WHERE domain = ?", (domain,)
+    ).fetchone()["c"]
+    already_contacted = len(contacted_emails(conn))
+
     mode_label = f"FOLLOW-UP #{round_num}" if is_followup else "INITIAL"
     print("=" * 60)
     print(f"  Cold Email Sender — {'DRY RUN' if args.dry_run else 'LIVE'} [{domain.upper()}] [{mode_label}]")
     print("=" * 60)
+    print(f"  Total loaded    : {total_loaded}")
+    print(f"  Already contacted: {already_contacted}")
     print(f"  Queue           : {len(queue)}")
     if not args.dry_run:
         print(f"  From            : {gmail[0]}")
@@ -228,6 +235,7 @@ def main():
         print("  Re-run without --dry-run to actually send.")
     else:
         print(f"  Done. {sent_count}/{len(queue)} emails sent.")
+        print(f"  State DB: {DEFAULT_DB_PATH.absolute()}")
     print("=" * 60)
 
 
