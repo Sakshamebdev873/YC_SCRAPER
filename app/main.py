@@ -13,7 +13,7 @@ DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
 
 def create_app() -> FastAPI:
-    from app.api import contacts, drafts, followups, queue, stats, templates
+    from app.api import contacts, drafts, followups, queue, runs, stats, templates
 
     app = FastAPI(title="Cold Email Applier")
     app.add_middleware(
@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
     app.include_router(queue.router)
     app.include_router(drafts.router)
     app.include_router(followups.router)
+    app.include_router(runs.router)
 
     if DIST.exists():
         app.mount("/", StaticFiles(directory=DIST, html=True), name="frontend")
