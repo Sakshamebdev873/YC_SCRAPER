@@ -12,9 +12,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- OpenAI API Configuration ---
-# Set this via environment variable (e.g., set OPENAI_API_KEY=sk-...)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# --- Gemini API Configuration ---
+# Set this via environment variable (e.g., set GEMINI_API_KEY=AIza...)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# Google's "latest" alias tracks the current flash release; override to pin.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "") or "gemini-flash-latest"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 # --- Algolia API Configuration (public keys from YC website) ---
 ALGOLIA_APP_ID = "45BWZJ1SGC"
@@ -53,7 +56,7 @@ DEFAULT_REQUEST_HEADERS = {
 
 # --- Pipelines ---
 ITEM_PIPELINES = {
-    "yc_scraper.pipelines.ChatGPTEmailPipeline": 300,
+    "yc_scraper.pipelines.GeminiEmailPipeline": 300,
     "yc_scraper.pipelines.CsvExportPipeline": 800,
 }
 

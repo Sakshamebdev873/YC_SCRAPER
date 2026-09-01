@@ -1,7 +1,8 @@
 import pytest
 
 from app.services.personalize import (
-    build_messages, generate_body, render_followup_body, render_subject,
+    MAX_TOKENS, build_messages, generate_body, model_name,
+    render_followup_body, render_subject,
 )
 
 TEMPLATES = {
@@ -72,15 +73,28 @@ def test_build_messages_blank_description_falls_back():
     assert "an early-stage startup" in user["content"]
 
 
-def test_generate_body_calls_openai_and_strips():
+def test_generate_body_calls_the_model_and_strips():
     client = FakeClient(reply="  Hi Ada,\n\nBody.  ")
     body = generate_body(client, TEMPLATES, CONTACT)
     assert body == "Hi Ada,\n\nBody."
     call = client.chat.completions.calls[0]
-    assert call["model"] == "gpt-4o-mini"
+    assert call["model"] == model_name()
     assert call["temperature"] == 0.3
-    assert call["max_tokens"] == 400
+    assert call["max_tokens"] == MAX_TOKENS
     assert len(call["messages"]) == 2
+
+
+def test_model_defaults_to_the_gemini_latest_alias(monkeypatch):
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    assert model_name() == "gemini-flash-latest"
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-pro-latest")
+    assert model_name() == "gemini-pro-latest"
+
+
+def test_generate_body_rejects_an_empty_reply():
+    client = FakeClient(reply="   ")
+    with pytest.raises(RuntimeError, match="empty body"):
+        generate_body(client, TEMPLATES, CONTACT)
 
 
 def test_render_subject_initial_and_followup():

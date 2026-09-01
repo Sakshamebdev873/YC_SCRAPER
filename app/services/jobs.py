@@ -12,7 +12,7 @@ from pathlib import Path
 from app.services.drafts import get_draft, update_draft, upsert_draft
 from app.services.mailer import connect_smtp, gmail_credentials, send_email
 from app.services.personalize import (
-    generate_body, openai_client, render_followup_body, render_subject,
+    generate_body, gemini_client, render_followup_body, render_subject,
 )
 from app.services.runner import bump, sleep_interruptible
 from app.services.templates import get_templates
@@ -28,7 +28,7 @@ def _contact(conn, contact_id):
 
 def make_generate_worker(contact_ids, domain: str, round_num: int, client=None):
     def worker(state, conn):
-        openai = client or (openai_client() if round_num == 0 else None)
+        llm = client or (gemini_client() if round_num == 0 else None)
         templates = get_templates(conn, domain)
         for index, contact_id in enumerate(contact_ids, 1):
             if state.stop_requested:
@@ -41,7 +41,7 @@ def make_generate_worker(contact_ids, domain: str, round_num: int, client=None):
             subject = render_subject(templates, contact, round_num)
             try:
                 if round_num == 0:
-                    body = generate_body(openai, templates, contact)
+                    body = generate_body(llm, templates, contact)
                 else:
                     body = render_followup_body(templates, contact, round_num)
                 draft_id = upsert_draft(conn, contact_id, domain, round_num, subject, body)

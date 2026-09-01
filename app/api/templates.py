@@ -10,8 +10,8 @@ from app.services.templates import (
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
-# Indirection so tests can inject a fake OpenAI client.
-preview_client_factory = personalize.openai_client
+# Indirection so tests can inject a fake Gemini client.
+preview_client_factory = personalize.gemini_client
 
 
 class TemplateBody(BaseModel):
@@ -99,7 +99,7 @@ def preview(body: PreviewBody, conn=Depends(get_db)):
         try:
             content = personalize.generate_body(preview_client_factory(), templates, contact)
         except Exception as e:  # noqa: BLE001 — surfaced to the editor
-            raise HTTPException(status_code=502, detail=f"OpenAI error: {e}")
+            raise HTTPException(status_code=502, detail=f"Gemini error: {e}")
     else:
         try:
             content = personalize.render_followup_body(templates, contact, body.round)

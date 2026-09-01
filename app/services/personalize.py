@@ -1,36 +1,47 @@
 """Turns a contact plus a template set into a subject and body.
 
-Lifted from send_emails.py's personalize_email. Behaviour is unchanged:
-same fallbacks, same model, same temperature and token cap.
+Bodies are written by Google Gemini, reached through its OpenAI-compatible
+endpoint — so the client object here is still the `openai` SDK's, and every
+call site keeps the `client.chat.completions.create` shape.
+
+Model defaults to the `gemini-flash-latest` alias so the app follows Google's
+current flash release instead of pinning a version that ages. Override with
+GEMINI_MODEL in .env (e.g. gemini-pro-latest for a stronger, slower writer).
 """
 
 import os
 from pathlib import Path
 
-MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "gemini-flash-latest"
+BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 TEMPERATURE = 0.3
-MAX_TOKENS = 400
+MAX_TOKENS = 1600
 
 
-def openai_client():
-    """Builds an OpenAI client from the environment, with the scraper settings
-    module as a fallback for the key (matching send_emails.py today)."""
+def model_name() -> str:
+    """Resolved at call time so .env loading order never matters."""
+    return os.environ.get("GEMINI_MODEL", "").strip() or DEFAULT_MODEL
+
+
+def gemini_client():
+    """Builds a Gemini-backed client from the environment, with the scraper
+    settings module as a fallback for the key."""
     from openai import OpenAI
 
-    key = os.environ.get("OPENAI_API_KEY", "").strip()
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         try:
             import sys
 
             sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-            from yc_scraper.settings import OPENAI_API_KEY as settings_key
+            from yc_scraper.settings import GEMINI_API_KEY as settings_key
 
             key = settings_key
         except Exception:
             key = ""
     if not key:
-        raise RuntimeError("OPENAI_API_KEY is not set — add it to your .env file.")
-    return OpenAI(api_key=key)
+        raise RuntimeError("GEMINI_API_KEY is not set — add it to your .env file.")
+    return OpenAI(api_key=key, base_url=BASE_URL)
 
 
 def build_messages(templates: dict, contact: dict) -> list:
@@ -50,14 +61,29 @@ def build_messages(templates: dict, contact: dict) -> list:
     ]
 
 
-def generate_body(client, templates: dict, contact: dict, model: str = MODEL) -> str:
+def generate_body(client, templates: dict, contact: dict, model: str = None) -> str:
     resp = client.chat.completions.create(
-        model=model,
+        model=model or model_name(),
         messages=build_messages(templates, contact),
         temperature=TEMPERATURE,
         max_tokens=MAX_TOKENS,
     )
-    return resp.choices[0].message.content.strip()
+    choice = resp.choices[0]
+    content = choice.message.content
+    if not (content or "").strip():
+        raise RuntimeError(
+            f"{model or model_name()} returned an empty body — "
+            "the token budget may have gone entirely to reasoning."
+        )
+    # Gemini spends part of the budget thinking before it writes, so a tight
+    # cap yields an email cut off mid-sentence. Fail the draft rather than
+    # let half a sentence reach a founder; raise MAX_TOKENS if this recurs.
+    if getattr(choice, "finish_reason", None) == "length":
+        raise RuntimeError(
+            f"{model or model_name()} hit the {MAX_TOKENS}-token cap and the body "
+            "was cut off mid-sentence — raise MAX_TOKENS in personalize.py."
+        )
+    return content.strip()
 
 
 def render_subject(templates: dict, contact: dict, round_num: int) -> str:

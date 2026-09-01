@@ -46,7 +46,7 @@ def config():
         "default_delay": jobs.DEFAULT_SEND_DELAY,
         "gmail_configured": bool(os.environ.get("GMAIL_EMAIL", "").strip()
                                  and os.environ.get("GMAIL_PASSWORD", "").strip()),
-        "openai_configured": bool(os.environ.get("OPENAI_API_KEY", "").strip()),
+        "gemini_configured": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
     }
 
 

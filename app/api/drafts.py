@@ -10,8 +10,8 @@ from app.services.templates import get_templates
 
 router = APIRouter(prefix="/api/drafts", tags=["drafts"])
 
-# Indirection so tests can inject a fake OpenAI client.
-regenerate_client_factory = personalize.openai_client
+# Indirection so tests can inject a fake Gemini client.
+regenerate_client_factory = personalize.gemini_client
 
 
 class DraftPatch(BaseModel):
@@ -74,7 +74,7 @@ def regenerate(draft_id: int, conn=Depends(get_db)):
         else:
             body = personalize.render_followup_body(templates, contact, draft["round"])
     except Exception as e:  # noqa: BLE001 — surfaced to the card
-        raise HTTPException(status_code=502, detail=f"OpenAI error: {e}")
+        raise HTTPException(status_code=502, detail=f"Gemini error: {e}")
 
     new_id = upsert_draft(conn, draft["contact_id"], draft["domain"],
                           draft["round"], subject, body)

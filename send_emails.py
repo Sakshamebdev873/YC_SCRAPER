@@ -38,7 +38,7 @@ Usage:
 Environment variables (set in .env or system):
     GMAIL_EMAIL      your Gmail address
     GMAIL_PASSWORD   App Password (create at myaccount.google.com/apppasswords)
-    OPENAI_API_KEY   for personalizing initial emails
+    GEMINI_API_KEY   for personalizing initial emails
 """
 
 import argparse
@@ -55,7 +55,7 @@ from app.services.drafts import upsert_draft, update_draft
 from app.services.leads import SALES_DOMAIN_ICP, generate_placeholder_leads
 from app.services.mailer import APP_PASSWORD_HELP, connect_smtp, gmail_credentials, send_email
 from app.services.personalize import (
-    generate_body, openai_client, render_followup_body, render_subject,
+    generate_body, gemini_client, render_followup_body, render_subject,
 )
 from app.services.queue import contacted_emails, eligible_followup, eligible_initial
 from app.services.templates import get_templates
@@ -139,7 +139,7 @@ def main():
             return
 
     try:
-        client = openai_client()
+        client = gemini_client()
     except RuntimeError as e:
         print(f"ERROR: {e}")
         return

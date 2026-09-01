@@ -1,6 +1,6 @@
 """
 Pipelines for YC Scraper:
-  1. ChatGPTEmailPipeline — Uses OpenAI ChatGPT API to predict founder emails.
+  1. GeminiEmailPipeline — Uses Google Gemini to predict founder emails.
   2. CsvExportPipeline — Exports all items to a CSV file.
 """
 
@@ -15,29 +15,33 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 
-class ChatGPTEmailPipeline:
-    """Uses OpenAI ChatGPT API to predict the most likely email for each founder."""
+class GeminiEmailPipeline:
+    """Uses Google Gemini to predict the most likely email for each founder."""
 
-    def __init__(self, api_key):
+    def __init__(self, api_key, model=None, base_url=None):
         self.api_key = api_key
+        self.model = model or "gemini-flash-latest"
+        self.base_url = base_url or "https://generativelanguage.googleapis.com/v1beta/openai/"
         self.client = None
         self.request_count = 0
         self.last_request_time = 0
         # Rate limit: be polite with API calls
-        self.min_delay = 1.0  # seconds between ChatGPT requests
+        self.min_delay = 1.0  # seconds between Gemini requests
 
     @classmethod
     def from_crawler(cls, crawler):
         return cls(
-            api_key=crawler.settings.get("OPENAI_API_KEY"),
+            api_key=crawler.settings.get("GEMINI_API_KEY"),
+            model=crawler.settings.get("GEMINI_MODEL"),
+            base_url=crawler.settings.get("GEMINI_BASE_URL"),
         )
 
     def open_spider(self):
-        self.client = OpenAI(api_key=self.api_key)
-        logger.info("OpenAI ChatGPT client initialized")
+        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        logger.info("Gemini client initialized (model=%s)", self.model)
 
     def close_spider(self):
-        logger.info(f"ChatGPT pipeline processed {self.request_count} requests")
+        logger.info(f"Gemini pipeline processed {self.request_count} requests")
 
     def _extract_domain(self, website_url):
         """Extract clean domain from a URL."""
@@ -57,14 +61,14 @@ class ChatGPTEmailPipeline:
             return website_url
 
     def _rate_limit(self):
-        """Enforce rate limiting for OpenAI API."""
+        """Enforce rate limiting for the Gemini API."""
         elapsed = time.time() - self.last_request_time
         if elapsed < self.min_delay:
             time.sleep(self.min_delay - elapsed)
         self.last_request_time = time.time()
 
     def process_item(self, item):
-        """Predict email for each founder using ChatGPT."""
+        """Predict email for each founder using Gemini."""
         founder_name = item.get("founder_name", "")
         company_name = item.get("company_name", "")
         website = item.get("company_website", "")
@@ -83,7 +87,7 @@ class ChatGPTEmailPipeline:
         try:
             prompt = self._build_prompt(founder_name, company_name, domain)
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=self.model,
                 messages=[
                     {
                         "role": "system",
@@ -102,16 +106,16 @@ class ChatGPTEmailPipeline:
                 max_tokens=100,
             )
 
-            # Parse ChatGPT response
+            # Parse the Gemini response
             result = response.choices[0].message.content.strip()
             self._parse_response(item, result, founder_name, domain)
             self.request_count += 1
 
             if self.request_count % 10 == 0:
-                logger.info(f"ChatGPT: Processed {self.request_count} email predictions")
+                logger.info(f"Gemini: Processed {self.request_count} email predictions")
 
         except Exception as e:
-            logger.warning(f"ChatGPT API error for {founder_name} at {company_name}: {e}")
+            logger.warning(f"Gemini API error for {founder_name} at {company_name}: {e}")
             # Fallback to basic guess
             item["predicted_email"] = self._basic_email_guess(founder_name, domain)
             item["email_pattern"] = "firstname@domain (fallback)"
@@ -119,7 +123,7 @@ class ChatGPTEmailPipeline:
         return item
 
     def _build_prompt(self, founder_name, company_name, domain):
-        """Build the ChatGPT prompt for email prediction."""
+        """Build the Gemini prompt for email prediction."""
         return (
             f"Founder Name: {founder_name}\n"
             f"Company Name: {company_name}\n"
@@ -138,7 +142,7 @@ class ChatGPTEmailPipeline:
         )
 
     def _parse_response(self, item, response_text, founder_name, domain):
-        """Parse ChatGPT's response to extract email and pattern."""
+        """Parse the model's response to extract email and pattern."""
         lines = [l.strip() for l in response_text.strip().split("\n") if l.strip()]
 
         if len(lines) >= 2:
