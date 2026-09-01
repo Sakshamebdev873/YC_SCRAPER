@@ -2,12 +2,13 @@
 
 An automated pipeline to scrape Y Combinator startup founders and send them personalized, AI-generated cold emails — for SDE intern outreach, or for pitching Corpus Carbon & Chemicals (corpuscarbon.com) as a sales domain.
 
-This project consists of three main components:
+This project consists of four main components:
 1. **YC Scraper (`yc_scraper`)**: Scrapes Y Combinator companies and founders via the Algolia API and YC company pages, then predicts founder emails using OpenAI ChatGPT (`gpt-4o-mini`).
 2. **Domains (`domains/`)**: Each domain owns its own pitch content (bio/system prompt/subject/follow-ups) and knows how to load its own list of target rows. Two domains ship today:
    - `job_application` (default) — SDE Intern outreach to YC founders, reading from the scraped CSV.
    - `sales_pitch` (`--sales`) — pitches Corpus Carbon & Chemicals' activated carbon products, on behalf of Karan. Two ICP segments selected with `--icp`: `traders` (activated carbon traders/distributors, default) and `professionals` (law/accounting firm owners or marketing directors, 10+ employees — pitched office HVAC/odor-control filter media). There's no real sales-lead list yet, so it generates a handful of random placeholder companies per ICP each run and routes every send to a fixed test inbox (`vinodarya344@gmail.com`) until a real lead source is wired up.
-3. **Cold Email Sender (`send_emails.py`)**: Domain-agnostic — asks the selected domain for rows and prompts, then handles personalization, company-based dedup, the 3-round follow-up cadence, and sent-log tracking the same way regardless of domain.
+3. **Cold Email Sender (`send_emails.py`)**: Domain-agnostic — asks the selected domain for rows and prompts, then handles personalization, company-based dedup, and the 3-round follow-up cadence the same way regardless of domain. State (who has been contacted, when, and in which round) lives in `output/app.db` rather than `sent_log.json`; the old JSON log is migrated on first run and left on disk as a backup.
+4. **Web UI (`app/`, `frontend/`)**: A local dashboard over the same database — contacts, template editing with live preview, per-draft review, sending with live progress, and follow-ups. Run it with `python app.py`. See [Web UI](#web-ui) below.
 
 ---
 
@@ -116,6 +117,56 @@ python send_emails.py --sales --icp professionals --dry-run
 python send_emails.py --sales --icp traders
 ```
 `--icp` defaults to `traders` if omitted. Default placeholder batch size is 2 leads for `traders` and 5 for `professionals` (override with `--max`). Replace `domains/sales_pitch.py`'s `load_rows()` with a real lead loader (CSV/API) once an actual sales-lead list exists — everything else (personalization, dedup, follow-ups, sent-log tracking) already works against it unchanged.
+
+---
+
+## Web UI
+
+A local dashboard covering the whole loop: contacts, template finalising with
+live preview, per-draft review, sending with live progress, and follow-ups.
+
+```bash
+# one-time: install backend deps and build the frontend
+pip install -r requirements.txt
+cd frontend && npm install && npm run build && cd ..
+
+# run it
+python app.py
+```
+
+Opens `http://127.0.0.1:8000` — localhost only, no auth, never exposed.
+
+**Screens**
+- **Dashboard** — contacts, contacted, pending/approved drafts, follow-ups due, recent runs.
+- **Contacts** — search and filter all scraped founders, fix a wrong predicted email inline, skip someone, or scrape a new batch.
+- **Templates** — edit the bio, system prompt, user prompt, subject, and the three follow-up bodies per domain. *Preview* renders with the text currently in the editor, saved or not, so you can iterate against a real founder before committing. Every save archives the previous version; Restore brings one back.
+- **Compose** — pick domain, batch, round, and a limit; generate drafts; edit, approve, reject, or regenerate each one.
+- **Send** — approved drafts only. Test mode is on by default and routes everything to `TEST_EMAIL`; turning it off raises a red banner. Live progress, and a Stop button that takes effect between emails.
+- **Follow-ups** — who is past the 3 / 4 / 5-day threshold for rounds 1, 2, and 3. Nothing sends automatically; you generate drafts and they go through the same review and send path.
+
+**Frontend development**
+
+```bash
+python -m uvicorn "app.main:create_app" --factory --port 8000   # terminal 1
+cd frontend && npm run dev                                       # terminal 2, port 5173
+```
+
+### State
+
+State lives in `output/app.db` (SQLite), seeded on first run from
+`output/yc_founders_emails.csv` and `output/sent_log.json`. Both files are left
+untouched as backups. Templates seed from `domains/*.py` and are editable from
+the UI thereafter — the Python modules stay as the original content and the
+first-run source. The CLI (`send_emails.py`) reads and writes the same database,
+so the UI and the CLI never disagree about who has been contacted.
+
+### Tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+No test opens a socket to Gmail or OpenAI.
 
 ---
 
