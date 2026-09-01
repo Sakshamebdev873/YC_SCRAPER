@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import Layout from './components/Layout'
+import Compose from './pages/Compose'
 import Contacts from './pages/Contacts'
 import Dashboard from './pages/Dashboard'
 import Templates from './pages/Templates'
@@ -16,7 +17,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="contacts" element={<Contacts />} />
           <Route path="templates" element={<Templates />} />
-          <Route path="compose" element={<Soon name="Compose" />} />
+          <Route path="compose" element={<Compose />} />
           <Route path="send" element={<Soon name="Send" />} />
           <Route path="followups" element={<Soon name="Follow-ups" />} />
         </Route>
