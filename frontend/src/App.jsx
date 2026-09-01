@@ -3,12 +3,9 @@ import Layout from './components/Layout'
 import Compose from './pages/Compose'
 import Contacts from './pages/Contacts'
 import Dashboard from './pages/Dashboard'
+import Followups from './pages/Followups'
 import Send from './pages/Send'
 import Templates from './pages/Templates'
-
-function Soon({ name }) {
-  return <p className="text-sm text-muted">{name} — not built yet.</p>
-}
 
 export default function App() {
   return (
@@ -20,7 +17,7 @@ export default function App() {
           <Route path="templates" element={<Templates />} />
           <Route path="compose" element={<Compose />} />
           <Route path="send" element={<Send />} />
-          <Route path="followups" element={<Soon name="Follow-ups" />} />
+          <Route path="followups" element={<Followups />} />
         </Route>
       </Routes>
     </BrowserRouter>
